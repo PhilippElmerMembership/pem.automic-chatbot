@@ -10,27 +10,24 @@ from prompts.system_prompt import pirate as system_prompt
 from utils.messagecache import MemoryCache, MessageCache
 from utils.decorator import get_openai_funcs
 
-# Decorator registriert tool, d.h. ist import notwendig
+# Import functions. The decorator will automatically add them to the list of functions that can be called by the bot.
 from tools.automic import *
-from tools.file import *
-
 
 load_dotenv(find_dotenv())
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Maximale Anzahl Funktionsaufrufe in einer Verarbeitung von GPT
-MAX_FUNC_CALL = 10
-# Maximale Anzahl von Chatnachrichten, an die sich der Bot erinnern kann (Systemmessage wird jeweils beibehalten)
-CONTEXT_WINDOW = 15
-# Kreativität der Antworten
-TEMPERATURE = 0.8
-# Zu verwendendes AI Model
-MODEL = "gpt-4-turbo"
-# Informiert über Funktionsaufrufe (steuerbar mit !debug)
+# Maximum of function calls that can be made during the handling of one user request.
+MAX_FUNC_CALL = os.getenv("MAX_FUNC_CALL", 10)
+# Maximum number of messages to send to OpenAI (history)
+CONTEXT_WINDOW = os.getenv("CONTEXT_WINDOW", 15)
+# Creativity of the AI response.
+TEMPERATURE = os.getenv("TEMPERATURE", 0.8)
+# Model to use for the chatbot
+MODEL = os.getenv("LLM")
+# Gives details on function call requests (can be activated using !debug)
 DEBUG = False
 
-# Der Nachrichten Cache merkt sich die letzen X Nachrichten im Chatverlauf. Das ist das "Gedächtnis".
-# Die Systemnachricht ist dabei das Regelwerk / der Charakter, welcher immer mitgegeben wird.
+# The cache stores the messages that have been sent to OpenAI so far. This is necessary to keep the context of the conversation.
 message_cache = MemoryCache(
     system_message=system_prompt,
     size=CONTEXT_WINDOW,
@@ -38,13 +35,13 @@ message_cache = MemoryCache(
 
 
 def call_openai(message_cache: MessageCache) -> Dict:
-    """Aufruf an OpenAI um den Chat zu "vervollständigen".
+    """Call the chatcompletion api.
 
     Args:
-        messages (List[str]): Nachrichtenhistory
+        messages (List[str]): History of messages
 
     Returns:
-        str: Antwort / Vervollständigung
+        str: Answer from the AI
     """
     return openai.chat.completions.create(
         model=MODEL,
@@ -56,8 +53,7 @@ def call_openai(message_cache: MessageCache) -> Dict:
 
 
 def welcome_header():
-    """Begrüssung"""
-    print(f"☝: Verwende CRTL-C um den Chat zu verlassen.")
+    print(f"☝: Use CRTL-C to end the chat.")
     print()
 
 
@@ -68,7 +64,7 @@ def process_command(cmd: str):
     if cmd == "!debug":
         global DEBUG
         DEBUG = not DEBUG
-        print(f"⚡: DEBUG Modus ist jetzt {DEBUG}")
+        print(f"⚡: DEBUG mode is {DEBUG}")
         return
 
     if cmd == "!history":
@@ -76,43 +72,42 @@ def process_command(cmd: str):
             print(message)
         return
 
-    print(f"💥: Unbekannter Befehl {cmd}")
+    print(f"💥: Unknown command {cmd}")
 
 
 def goodbye_footer():
-    """Verabschiedung"""
     print()
     print()
-    print(f"👋: Danke fürs vorbeischauen!")
+    print(f"👋: Goodbye!")
 
 
 def call_function(
     function_name: str, function_args: Optional[str] = None
 ) -> Optional[Dict]:
-    """Funktionsaufruf durch den ChatBot
+    """Request of LLM to call a function.
 
     Args:
-        function_name (str): Name der zu startenden Funktion
-        function_args (Optional[str], optional): Parameter, falls zutreffend. Defaults to None.
+        function_name (str): Name of requested function to call.
+        function_args (Optional[str], optional): Parameters. Defaults to None.
 
     Raises:
-        NotImplementedError: (Versuchter) Aufruf einer nicht implementierten Funktion.
+        NotImplementedError: LLM tried to call an invalid function.
 
     Returns:
-        str: Identifizierte Folgefunktion (falls zutreffend)
+        str: Identified follow-up function.
     """
-    message = f"Funktionaufruf {function_name} mit Argumenten {function_args}"
+    message = f"Function call {function_name} with arguments {function_args}"
     if DEBUG:
         print(f"⚡: {message}")
 
-    # Bezieht aus der Liste von Funktionen diejenige, welche mit dem beantragten Namen übereinstimmt.
+    # Try to get registered function.
     runner = globals().get(function_name)
     if not runner:
         raise NotImplementedError(
-            f"💥: Unbekannte Funktion wurde beantragt: {function_name}"
+            f"💥: Unknown function was requested: {function_name}"
         )
 
-    # Funktion mit gegebenen Parametern ausführen.
+    # Call function with parameters requested by LLM.
     args = None
     if function_args:
         args = json.loads(function_args)
@@ -128,47 +123,47 @@ def call_function(
     except Exception as e:
         message_cache.add_message(
             role="function",
-            message=f"Funktionsaufruf fehlgeschlagen. Prüfe die Parameter und probiere es erneut.",
+            message=f"Function call failed. Please check arguments.",
             name=function_name,
         )
-        print(f"💥: Funktionsaufruf fehlgeschlagen: {e}")
+        print(f"💥: Function call failed: {e}")
 
     return response
 
 
 def conversation_loop():
-    """Unterhaltung mit GPT führen"""
+    """Start the chat loop."""
 
-    # Eingabe des Benutzers erfassen
     user_msg = input("😬: ")
 
     if not user_msg:
         return
 
-    # Wenn die Eingabe mit "!" beginnt, wird es als Befehl erkannt
+    # If the input starts with !, it is interpreted as command for the chatbot software.
+    # So we won't send this to the LLM.
     if user_msg.startswith("!"):
         process_command(cmd=user_msg)
         return
 
-    # Chat führen und prüfen, ob ein Funktionsaufruf beantragt wurde
+    # Add user input to chat history and call the autocompletion API.
     message_cache.add_message(role="user", message=user_msg)
     response = call_openai(message_cache=message_cache)
 
+    # Extract the LLM answer and the function to call (if any).
     message = response.choices[0].message
     function = message.function_call
 
-    # Bei einem Funktionsaufruf, diesen Verarbeiten
+    # If one or more function calls are requested, process them here.
     func_loop = 0
     while function:
         if func_loop == MAX_FUNC_CALL:
-            print(
-                f"💥: Funktionsloop wird unterbrochen wegen Erreichen von MAX_FUNC_CALL!"
-            )
+            print(f"💥: Cancelling loop because of too many function calls.")
+
             message_cache.add_message(
                 role="user",
-                message=f"Mehr kann ich dir nicht ausfindig machen, da ich nur {MAX_FUNC_CALL} Tools nacheinander aufrufen kann. Bitte sag das dem Benutzer.",
+                message=f"I already called {MAX_FUNC_CALL} functions. Please tell the user that a loop prevention stopped further tool calling.",
             )
-            # Sicherstellen, dass der Fehler als Chatnachricht formatiert wird.
+            # Let the feedback be processed by the AI.
             response = call_openai(message_cache=message_cache)
             break
 
@@ -184,18 +179,18 @@ def conversation_loop():
 
         function = response.choices[0].message.function_call
 
-    # Antwort von GPT zurückgeben
+    # Show response to the user.
     if response:
         robot_msg = response.choices[0].message.content
     else:
-        robot_msg = "Ich habe keine Antwort für dich. 😕"
+        robot_msg = "LLM did not answer anything 😕"
 
     message_cache.add_message(role="assistant", message=robot_msg)
     print(f"🤖: {robot_msg}")
 
 
 def main():
-    """Loop Kontrolle"""
+    """Main loop"""
     welcome_header()
 
     while True:

@@ -3,6 +3,12 @@ from typing import Dict, List, Optional
 
 
 class MessageCache(ABC):
+    """
+    The message cache stores the messages that have been sent to OpenAI.
+    You could implement a variation that uses a database or a file to store
+    the messages, or just keep it in memory as I do with MemoryCache.
+    """
+
     size: int
     system_message: str
     cache: List[str]
