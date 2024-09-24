@@ -3,17 +3,16 @@ import json
 import openai
 
 from typing import Dict, Optional
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
 
 from prompts.system_prompt import default as system_prompt
 
 from utils.messagecache import MemoryCache, MessageCache
 from utils.decorator import get_openai_funcs
 
-# Import functions. The decorator will automatically add them to the list of functions that can be called by the bot.
 from tools.automic import *
 
-load_dotenv(find_dotenv())
+load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Maximum of function calls that can be made during the handling of one user request.
@@ -35,7 +34,8 @@ message_cache = MemoryCache(
 
 
 def call_openai(message_cache: MessageCache) -> Dict:
-    """Call the chatcompletion api.
+    """
+    Call the chatcompletion api.
 
     Args:
         messages (List[str]): History of messages
@@ -43,6 +43,7 @@ def call_openai(message_cache: MessageCache) -> Dict:
     Returns:
         str: Answer from the AI
     """
+
     return openai.chat.completions.create(
         model=MODEL,
         temperature=TEMPERATURE,
@@ -53,11 +54,24 @@ def call_openai(message_cache: MessageCache) -> Dict:
 
 
 def welcome_header():
-    print(f"☝: Use CRTL-C to end the chat.")
+    """
+    This is how every chat starts.
+    """
+
+    print(f"☝: Use CRTL-C or enter !exit to end the chat")
+    print(f"☝: Enter !debug to toggle debug messages.")
+    print(f"☝: Enter !history to see the message cache.")
     print()
 
 
 def process_command(cmd: str):
+    """
+    Process chatbot command that was entered by the user. These are identified by a leading !.
+
+    Args:
+        cmd (str): Command entered by the user
+    """
+
     if cmd == "!exit":
         raise KeyboardInterrupt()
 
@@ -76,6 +90,10 @@ def process_command(cmd: str):
 
 
 def goodbye_footer():
+    """
+    This is how every chat ends.
+    """
+
     print()
     print()
     print(f"👋: Goodbye!")
@@ -84,18 +102,20 @@ def goodbye_footer():
 def call_function(
     function_name: str, function_args: Optional[str] = None
 ) -> Optional[Dict]:
-    """Request of LLM to call a function.
+    """
+    Process an LLM request to call a tool.
 
     Args:
         function_name (str): Name of requested function to call.
         function_args (Optional[str], optional): Parameters. Defaults to None.
 
     Raises:
-        NotImplementedError: LLM tried to call an invalid function.
+        NotImplementedError: LLM tried to call an invalid function. This should never happen.
 
     Returns:
         str: Identified follow-up function.
     """
+
     message = f"Function call {function_name} with arguments {function_args}"
     if DEBUG:
         print(f"⚡: {message}")
@@ -114,50 +134,30 @@ def call_function(
 
     response = None
     try:
-        function_response = runner(**args)
-
-        message_cache.add_message(
-            role="function",
-            message=f"Function call {function_name} with arguments {function_args} result:\n{function_response}",
-            name=function_name,
-        )
-        response = call_openai(message_cache=message_cache)
+        function_call_result = runner(**args)
     except Exception as e:
-        # Forward the error message to the LLM and give it a chance to fix it.
-        message_cache.add_message(
-            role="function",
-            message=f"Function call {function_name} with arguments {function_args} result:\n{e}",
-            name=function_name,
-        )
-        response = call_openai(message_cache=message_cache)
+        function_call_result = e
         print(f"💥: Function call failed: {e}")
+
+    message_cache.add_message(
+        role="function",
+        message=f"Function call {function_name} with arguments {function_args} result:\n{function_call_result}",
+        name=function_name,
+    )
+    response = call_openai(message_cache=message_cache)
 
     return response
 
 
-def conversation_loop():
-    """Start the chat loop."""
+def function_loop(function: Dict, message_cache: MessageCache):
+    """
+    Process a function call requests from the AI. This loops until either all function call requests are processed or a loop prevention stops further tool calling.
 
-    user_msg = input("😬: ")
+    Args:
+        function (Dict): Function call request from the AI.
+        message_cache (MessageCache): Cache of messages sent to OpenAI.
+    """
 
-    if not user_msg:
-        return
-
-    # If the input starts with !, it is interpreted as command for the chatbot software.
-    # So we won't send this to the LLM.
-    if user_msg.startswith("!"):
-        process_command(cmd=user_msg)
-        return
-
-    # Add user input to chat history and call the autocompletion API.
-    message_cache.add_message(role="user", message=user_msg)
-    response = call_openai(message_cache=message_cache)
-
-    # Extract the LLM answer and the function to call (if any).
-    message = response.choices[0].message
-    function = message.function_call
-
-    # If one or more function calls are requested, process them here.
     func_loop = 0
     while function:
         if func_loop == MAX_FUNC_CALL:
@@ -183,6 +183,36 @@ def conversation_loop():
 
         function = response.choices[0].message.function_call
 
+    return response
+
+
+def conversation_loop():
+    """
+    This is the chat loop.
+    """
+
+    user_msg = input("😬: ")
+
+    if not user_msg:
+        return
+
+    # If the input starts with !, it is interpreted as command for the chatbot software. So we won't send this to the LLM.
+    if user_msg.startswith("!"):
+        process_command(cmd=user_msg)
+        return
+
+    # Add user input to chat history and call the autocompletion API.
+    message_cache.add_message(role="user", message=user_msg)
+    response = call_openai(message_cache=message_cache)
+
+    # Extract the LLM answer and the function to call (if any).
+    message = response.choices[0].message
+    function = message.function_call
+
+    # If a function call was requested, we enter the function loop.
+    if function:
+        response = function_loop(function=function, message_cache=message_cache)
+
     # Show response to the user.
     if response:
         robot_msg = response.choices[0].message.content
@@ -194,7 +224,9 @@ def conversation_loop():
 
 
 def main():
-    """Main loop"""
+    """
+    Main loop
+    """
     welcome_header()
 
     while True:
