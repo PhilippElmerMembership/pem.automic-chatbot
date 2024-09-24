@@ -5,7 +5,7 @@ import openai
 from typing import Dict, Optional
 from dotenv import load_dotenv, find_dotenv
 
-from prompts.system_prompt import pirate as system_prompt
+from prompts.system_prompt import default as system_prompt
 
 from utils.messagecache import MemoryCache, MessageCache
 from utils.decorator import get_openai_funcs
