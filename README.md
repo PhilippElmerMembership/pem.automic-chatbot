@@ -1,6 +1,6 @@
 # Automic Chatbot
 
-This is an example on how an Automic chatbot could be implemented.
+This is an example of a chatbot using GPT function calls to perform tasks on the Broadcom Automic Automation platform. This software is for educational purposes only and was developed for an AI presentation and workshop during the 5 years PEM conference 2024 in Vienna. PEM is an independant e-learning platform for Broadcom Automic Automation, available in English (https://pemautomic.com) and German (https://membership.philippelmer.com).
 
 ## Installation
 
@@ -24,9 +24,9 @@ OPENAI_API_KEY="secret"
 AUTOMIC_ENDPOINT = "https://[host]/ae/api/v1/[client]"
 AUTOMIC_USERNAME = "automic-username"
 AUTOMIC_PASSWORD = "automic-password"
-LLM = "gpt-4-turbo"
+LLM = "gpt-4o-mini"
 ```
 
 ## Usage
 
-necessary.
+Start main.py and enjoy chatting. Amend prompts/system_prompt.py if you want to control the bot character.
