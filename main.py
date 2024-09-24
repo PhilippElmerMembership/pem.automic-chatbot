@@ -117,15 +117,19 @@ def call_function(
         function_response = runner(**args)
 
         message_cache.add_message(
-            role="function", message=f"{function_response}", name=function_name
+            role="function",
+            message=f"Function call {function_name} with arguments {function_args} result:\n{function_response}",
+            name=function_name,
         )
         response = call_openai(message_cache=message_cache)
     except Exception as e:
+        # Forward the error message to the LLM and give it a chance to fix it.
         message_cache.add_message(
             role="function",
-            message=f"Function call failed. Please check arguments.",
+            message=f"Function call {function_name} with arguments {function_args} result:\n{e}",
             name=function_name,
         )
+        response = call_openai(message_cache=message_cache)
         print(f"💥: Function call failed: {e}")
 
     return response
